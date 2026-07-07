@@ -13,15 +13,7 @@
 
 在仓库 Settings → Secrets and variables → Actions 中配置以下 Secrets：
 
-### LLM 配置（用于分类和翻译）
-
-| Secret | 说明 | 示例 |
-|--------|------|------|
-| `LLM_API_KEY` | 大模型API密钥 | `sk-xxxxx` |
-| `LLM_BASE_URL` | 大模型API地址 | `https://api.openai.com/v1` |
-| `LLM_MODEL` | 模型名称 | `doubao-seed-2-0-lite-260215` 或 `gpt-4o` |
-
-### 飞书配置
+### 飞书配置（必填）
 
 | Secret | 说明 | 示例 |
 |--------|------|------|

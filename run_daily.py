@@ -116,64 +116,46 @@ def search_news(query: str) -> list[dict]:
 
 
 # ============================================================
-# LLM 分类翻译
+# 翻译功能（免费Google翻译，无需API Key）
+# ============================================================
+def _translate_text(text: str) -> str:
+    """使用Google免费翻译API将文本翻译为中文"""
+    if not text or len(text.strip()) < 2:
+        return text
+    # 检测是否已经是中文（包含中文字符）
+    import re
+    if re.search(r'[\u4e00-\u9fff]', text):
+        return text
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": "zh-CN",
+            "dt": "t",
+            "q": text[:2000],  # 限制长度
+        }
+        resp = requests.get(url, params=params, timeout=8)
+        resp.raise_for_status()
+        result = resp.json()
+        translated = "".join([item[0] for item in result[0] if item[0]])
+        return translated.strip() or text
+    except Exception as e:
+        logger.debug(f"翻译失败: {e}")
+        return text
+
+
+# ============================================================
+# 报告生成（分类整理 + 翻译）
 # ============================================================
 def analyze_with_llm(all_results: dict) -> str:
-    """使用LLM对搜索结果进行分类、整理和翻译，返回Markdown格式报告"""
-    if not LLM_API_KEY or not LLM_BASE_URL:
-        logger.warning("未配置LLM，使用模板方式生成报告")
-        return _build_template_report(all_results)
-
-    try:
-        from langchain_openai import ChatOpenAI
-        from langchain_core.messages import HumanMessage, SystemMessage
-    except ImportError:
-        logger.warning("langchain-openai 未安装，使用模板方式生成报告")
-        return _build_template_report(all_results)
-
-    # 构建LLM输入
-    today_str = _get_date_str()
-    mode_label = "昨日" if MODE == "yesterday" else "今日"
-
-    # 将搜索结果拼成文本
-    search_text = ""
-    for key, results in all_results.items():
-        emoji, country, category = SEARCH_COUNTRIES.get(key, ("", key, ""))
-        search_text += f"\n## {emoji} {country} - {category}\n"
-        for i, r in enumerate(results, 1):
-            search_text += f"{i}. {r['title']}\n   {r['snippet'][:200]}\n   链接: {r['url']}\n"
-
-    system_prompt = """你是一个专业的信息整理与翻译助手。你的任务是将搜索到的英文/韩文/中文信息整理成中文日报。
-
-要求：
-1. 按国家(美国/韩国/中国)和类别(技术/股市)分类整理
-2. 将每条信息翻译成中文，保留原文链接
-3. 每条信息用一句话概括核心要点（不超过50字）
-4. 输出格式为Markdown，使用 ## 标题、**粗体**、[链接](url) 等格式
-5. 内容精炼，每类3-5条即可
-6. 报告开头标注日期和模式（昨日回顾/今日实时）"""
-
-    try:
-        llm = ChatOpenAI(
-            model=LLM_MODEL,
-            api_key=LLM_API_KEY,
-            base_url=LLM_BASE_URL,
-            temperature=0.3,
-            timeout=120,
-        )
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=f"请整理以下 {today_str} 的{mode_label}热门信息，翻译成中文日报：\n\n{search_text}"),
-        ]
-        response = llm.invoke(messages)
-        return response.content
-    except Exception as e:
-        logger.error(f"LLM调用失败: {e}")
-        return _build_template_report(all_results)
+    """整理搜索结果，分类翻译，返回Markdown格式报告"""
+    logger.info("使用模板方式生成报告（含免费翻译）")
+    return _build_template_report(all_results, translate=True)
 
 
-def _build_template_report(all_results: dict) -> str:
-    """模板方式生成报告（当LLM不可用时的降级方案）"""
+def _build_template_report(all_results: dict, translate: bool = False) -> str:
+    """模板方式生成报告"""
     today_str = _get_date_str()
     mode_label = "昨日回顾" if MODE == "yesterday" else "今日实时"
     lines = [f"**📅 {today_str}（{mode_label}）**\n"]
@@ -188,11 +170,20 @@ def _build_template_report(all_results: dict) -> str:
         for i, r in enumerate(results[:5], 1):
             title = r.get("title", "").strip()[:80]
             url = r.get("url", "")
-            snippet = r.get("snippet", "").strip()[:100]
-            if title:
-                link_text = f"[查看详情]({url})" if url else ""
-                snippet_text = f" — {snippet}" if snippet else ""
-                lines.append(f"{i}. **{title}**{snippet_text} {link_text}")
+            snippet = r.get("snippet", "").strip()[:120]
+            # 翻译标题和摘要
+            if translate:
+                title_cn = _translate_text(title) or title
+                snippet_cn = _translate_text(snippet) or snippet
+            else:
+                title_cn = title
+                snippet_cn = snippet
+            link_text = f"[查看详情]({url})" if url else ""
+            snippet_text = f" — {snippet_cn}" if snippet_cn else ""
+            lines.append(f"{i}. **{title_cn}**{snippet_text} {link_text}")
+            # 如果标题被翻译且在模板模式下，保留原文作为补充
+            if translate and title_cn != title and len(title) > 5:
+                lines[-1] += f"\n   *原文：{title[:60]}*"
 
     return "\n".join(lines)
 
